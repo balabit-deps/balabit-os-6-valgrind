@@ -1,0 +1,76 @@
+From b3fb595397aa476f8c88c07fc44f192ac7a6d3e2 Mon Sep 17 00:00:00 2001
+From: florian <florian@a5019735-40e9-0310-863c-91ae7b9d1cf9>
+Date: Mon, 12 Oct 2015 20:35:56 +0000
+Subject: [PATCH] On a zEC12 or z13, a glibc with lock elision enabled infers
+ from HWCAP that the prerequisites for lock elision are met.  Then it may use
+ TBEGIN and other transactional-execution instructions which are not
+ implemented by Valgrind.  Likewise, the upcoming glibc 2.23 will exploit
+ vector instructions if they are advertised by HWCAP; and those are currently
+ not implemented by Valgrind either.  In general, the increased use of ifunc
+ may lead to more such cases in the future.
+
+This patch suppresses the advertising of those hardware features via
+HWCAP which are either not known to Valgrind or currently unsupported.
+
+Patch by Andreas Arnez (arnez@linux.vnet.ibm.com).
+Fixes BZ #353680.
+
+git-svn-id: svn://svn.valgrind.org/valgrind/trunk@15702 a5019735-40e9-0310-863c-91ae7b9d1cf9
+
+Bug-Ubuntu: http://bugs.launchpad.net/bugs/1563420
+
+diff --git a/README.s390 b/README.s390
+index 5b3d3c0..96dac1b 100644
+--- a/README.s390
++++ b/README.s390
+@@ -22,6 +22,9 @@ Limitations
+ - Some gcc versions use mvc to copy 4/8 byte values. This will affect
+   certain debug messages. For example, memcheck will complain about
+   4 one-byte reads/writes instead of just a single read/write.
++- The transactional-execution facility is not supported; it is masked
++  off from HWCAP.
++- The vector facility is not supported; it is masked off from HWCAP.
+ 
+ 
+ Hardware facilities
+diff --git a/coregrind/m_initimg/initimg-linux.c b/coregrind/m_initimg/initimg-linux.c
+index c8b7080..ce87615 100644
+--- a/coregrind/m_initimg/initimg-linux.c
++++ b/coregrind/m_initimg/initimg-linux.c
+@@ -701,6 +701,12 @@ Addr setup_client_stack( void*  init_sp,
+                  in syswrap-arm-linux.c rather than to base this on
+                  conditional compilation. */
+             }
++#           elif defined(VGP_s390x_linux)
++            {
++               /* Advertise hardware features "below" TE only.  TE and VXRS
++                  (and anything above) are not supported by Valgrind. */
++               auxv->u.a_val &= VKI_HWCAP_S390_TE - 1;
++            }
+ #           endif
+             break;
+ #        if defined(VGP_ppc64be_linux) || defined(VGP_ppc64le_linux)
+diff --git a/include/vki/vki-s390x-linux.h b/include/vki/vki-s390x-linux.h
+index d8eebed..c3f6d00 100644
+--- a/include/vki/vki-s390x-linux.h
++++ b/include/vki/vki-s390x-linux.h
+@@ -800,12 +800,15 @@ typedef struct
+ #define VKI_PTRACE_POKEUSR_AREA       0x5001
+ 
+ //----------------------------------------------------------------------
+-// From linux-2.6.16.60/include/asm-s390/elf.h
++// From linux-3.18/include/asm-s390/elf.h
+ //----------------------------------------------------------------------
+ 
+ typedef vki_s390_fp_regs vki_elf_fpregset_t;
+ typedef vki_s390_regs vki_elf_gregset_t;
+ 
++#define VKI_HWCAP_S390_TE           1024
++#define VKI_HWCAP_S390_VXRS         2048
++
+ 
+ //----------------------------------------------------------------------
+ // From linux-2.6.16.60/include/asm-s390/ucontext.h
+-- 
+2.8.0.rc3
+
